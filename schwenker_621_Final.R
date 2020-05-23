@@ -1,20 +1,18 @@
 library(tidyverse)
 library(sf)
-library(RSocrata) # to download data from the city api
-library(keyring)
 library(units)
-library(tmap)
 
 
-
+#census tract geojson
 geo_url <- "https://data.cityofnewyork.us/api/geospatial/fxpq-c8ku?method=export&format=GeoJSON"
 
-# read in geojson of tract geometry and calculate area of each tract in sq mi
+# read in geojson of tract geometry 
 tract_sf <- read_sf(geo_url) %>%
   st_transform(2263) %>%   # convert to same projection as above
   select(boro_name, boro_ct2010) %>%
   mutate(area = set_units(st_area(.), mi^2)) %>%
   print()  
+#saved locally because file was too large to host on github
 crime_all <- read.csv("/Users/Sarah/Downloads/NYPD_Complaint_Data_Historic.csv",stringsAsFactors=FALSE)
 crime_all$year<-as.character(crime_all$RPT_DT)
 crime_all$year<-substr(crime_all$year, 7, 10)
@@ -33,7 +31,7 @@ print(typeof(crime$date))
 crime$date<-as.Date(crime$date,"%Y-%m-%d")
 crime <- subset(crime_all, date > "2009-12-31" & date < "2011-01-01")
 
-# convert tree data frame into sf object
+# convert data frame into sf object
 crime_sf <- crime %>%
   mutate_at(vars(X_COORD_CD, Y_COORD_CD), as.numeric) %>%   # coordinates must be numeric
   st_as_sf(
@@ -52,7 +50,7 @@ sum(crime_tract_count$n)
 crime_tract_count <- count(as_tibble(crime_in_tract), boro_ct2010) %>%
   print()
 print(typeof(crime_tract_count$boro_ct2010))
-# join tree count with tract df, calc tree density
+# join  count with tract df
 tract_crime_sf <- left_join(tract_sf, crime_tract_count) %>%
   print()
 
@@ -66,50 +64,48 @@ census <- read.csv("https://raw.githubusercontent.com/aschwenker/Data_621/master
 census$BCT<-paste(census$X2010.DCP.Borough.Code,census$X2010.Census.Tract,sep="")
 census$BCT<-as.numeric(census$BCT)
 total <- merge(crime_tract_count,census,by.x=c("BCT"),by.y=c("BCT"))
+
+#reomve comma and convert to number
+total$t_pop_2010 <- gsub(",","",total$t_pop_2010)
+total$t_pop_2010<-as.numeric(total$t_pop_2010)
+#plot and review for linearity
 ggplot(total, aes(x = t_pop_2010, y = n)) +
   geom_point() +
   stat_smooth()
-total$t_pop_2010 <- gsub(",","",total$t_pop_2010)
+#assess outliers
 
+boxplot(total$n, main="Count of Crime", sub=paste("Outlier rows: ", boxplot.stats(total$n)$out))  
+boxplot(total$t_pop_2010, main="Total Population by Census Tract")
+
+#subset 
 total_no_outliers<-subset(total,n<500)
 total_no_outliers<-subset(total_no_outliers,t_pop_2010<10000)
-total$t_pop_2010<-as.numeric(total$t_pop_2010)
 
-total_no_outliers$t_pop_2010 <- gsub(",","",total_no_outliers$t_pop_2010)
-total_no_outliers$t_pop_2010<-as.numeric(total_no_outliers$t_pop_2010)
 ggplot(total_no_outliers, aes(x = t_pop_2010, y = n)) +
   geom_point() +
   stat_smooth()
-ggplot(total_no_outliers, aes(x = sqrt(t_pop_2010), y = sqrt(n))) +
-  geom_point() +
-  stat_smooth()
+
 cor(total_no_outliers$t_pop_2010, total_no_outliers$n,use = "complete.obs")
-
-boxplot(total$n, main="Count of Crime", sub=paste("Outlier rows: ", boxplot.stats(total$n)$out))  # box plot for 'speed'
-boxplot(total$t_pop_2010, main="Total Population by Census Tract")
-
-boxplot(total_no_outliers$n, main="Count of Crime subset where crime count< 500 and pop < 10000")  # box plot for 'speed'
+#assess outliers after subset
+boxplot(total_no_outliers$n, main="Count of Crime subset where crime count< 500 and pop < 10000")  
 boxplot(total_no_outliers$t_pop_2010,main="Count of subset of total population by census tract where crime count< 500 and pop < 10000")
 
-
+#check for distribution normality
 plot(density(total_no_outliers$t_pop_2010), main="Density Plot: subsetted population variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(total_no_outliers$t_pop_2010), 2)))  # density plot for 'speed'
 polygon(density(total_no_outliers$t_pop_2010), col="red")
 plot(density(total_no_outliers$n), main="Density Plot: subsetted crime variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(total_no_outliers$n), 2)))  # density plot for 'speed'
 polygon(density(total_no_outliers$n), col="red")
-
+#apply sqrt and see if it improves normality
 plot(density(sqrt(total_no_outliers$t_pop_2010)), main="Density Plot: subsetted sqrt of population variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(sqrt(total_no_outliers$t_pop_2010)), 2)))  # density plot for 'speed'
 polygon(density(sqrt(total_no_outliers$t_pop_2010)), col="red")
 plot(density(sqrt(total_no_outliers$n)), main="Density Plot: subsetted sqrt of crime variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(sqrt(total_no_outliers$n)), 2)))  # density plot for 'speed'
 polygon(density(sqrt(total_no_outliers$n)), col="red")
-
+#try log
 plot(density(log(total_no_outliers$t_pop_2010)), main="Density Plot: subsetted population variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(log(total_no_outliers$t_pop_2010)), 2)))  # density plot for 'speed'
 polygon(density(log(total_no_outliers$t_pop_2010)), col="red")
 plot(density(log(total_no_outliers$n)), main="Density Plot: subsetted crime variable", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(log(total_no_outliers$n)), 2)))  # density plot for 'speed'
 polygon(density(log(total_no_outliers$n)), col="red")
-missing_data<-sum(is.na(total_no_outliers))
-colSums(is.na(total_no_outliers))
-
-
+#build model and summarize
 model <- lm(sqrt(n) ~ sqrt(t_pop_2010) , data = total_no_outliers)
 summary(model)
 par(mfrow=c(2,2))
